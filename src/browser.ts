@@ -17,6 +17,7 @@ export async function getPage(): Promise<Page> {
     viewport: { width: 1400, height: 900 },
     args: ['--disable-blink-features=AutomationControlled'],
   });
+  ctx.on('close', () => { ctx = null; pageRef = null; });
   pageRef = ctx.pages()[0] ?? (await ctx.newPage());
   pageRef.setDefaultTimeout(20000);
   pageRef.setDefaultNavigationTimeout(45000);

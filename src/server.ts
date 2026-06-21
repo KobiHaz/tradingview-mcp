@@ -5,13 +5,19 @@ import * as fs from 'fs';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import type { Page } from 'playwright';
 import { getPage, PROFILE_DIR } from './browser';
 import {
-  isLoggedIn, openWatchlist, readCurrentSymbols, addSymbolsBulk, removeSymbol, captureChart, tvInterval,
+  isLoggedIn, openWatchlist, readCurrentSymbols, addSymbolsBulk, removeSymbol, captureChart,
 } from './driver';
 
-// tvInterval is imported for use in the server if needed — suppress unused-import lint
-void tvInterval;
+// Serialize tool calls — they all drive one shared browser page.
+let lock: Promise<unknown> = Promise.resolve();
+function withLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = lock.then(fn, fn);
+  lock = run.then(() => {}, () => {});
+  return run;
+}
 
 const SYMBOLS_SCHEMA = { type: 'array', items: { type: 'string' }, minItems: 1 };
 
@@ -34,27 +40,35 @@ const TOOLS = [
 function text(t: string) { return { content: [{ type: 'text', text: t }] }; }
 function errText(t: string) { return { isError: true, content: [{ type: 'text', text: t }] }; }
 
-async function ensureLoggedIn(page: import('playwright').Page): Promise<boolean> {
+let readyPage: Page | null = null;
+let loggedInCache = false;
+// Navigate to the chart + verify login once per page; cached on repeat calls.
+async function ensureReady(page: Page): Promise<boolean> {
+  if (readyPage === page) return loggedInCache;
   await page.goto('https://www.tradingview.com/chart/', { waitUntil: 'domcontentloaded', timeout: 45000 });
   await page.waitForTimeout(5000);
-  return isLoggedIn(page);
+  loggedInCache = await isLoggedIn(page);
+  readyPage = page;
+  return loggedInCache;
 }
 
 const server = new Server({ name: 'tradingview', version: '1.0.0' }, { capabilities: { tools: {} } });
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
-server.setRequestHandler(CallToolRequestSchema, async (req) => {
+server.setRequestHandler(CallToolRequestSchema, async (req) =>
+  withLock(async () => {
   const name = req.params.name;
   const args: Record<string, unknown> = (req.params.arguments as Record<string, unknown>) || {};
   try {
     const page = await getPage();
 
     if (name === 'tv_session_status') {
-      const loggedIn = await ensureLoggedIn(page);
+      readyPage = null;                 // force a fresh nav + check
+      const loggedIn = await ensureReady(page);
       return text(JSON.stringify({ loggedIn, profileDir: PROFILE_DIR }));
     }
 
-    if (!(await ensureLoggedIn(page))) {
+    if (!(await ensureReady(page))) {
       return errText('Not logged into TradingView. Run `npm run login` in the tradingview-mcp repo once.');
     }
 
@@ -89,7 +103,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
 
     if (name === 'tv_add_symbols') {
-      const syms = (args.symbols as string[]).map((s) => String(s).trim().toUpperCase()).filter(Boolean);
+      const syms = (Array.isArray(args.symbols) ? args.symbols : [])
+        .map((s) => String(s).trim().toUpperCase()).filter(Boolean);
       if (!syms.length) return errText('symbols must be a non-empty array');
       await openWatchlist(page, String(args.watchlist), true);
       const { added, failed } = await addSymbolsBulk(page, syms);
@@ -97,7 +112,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
 
     if (name === 'tv_remove_symbols') {
-      const syms = (args.symbols as string[]).map((s) => String(s).trim().toUpperCase()).filter(Boolean);
+      const syms = (Array.isArray(args.symbols) ? args.symbols : [])
+        .map((s) => String(s).trim().toUpperCase()).filter(Boolean);
       if (!syms.length) return errText('symbols must be a non-empty array');
       const found = await openWatchlist(page, String(args.watchlist), false);
       if (!found) return errText(`watchlist not found: ${args.watchlist}`);
@@ -110,7 +126,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   } catch (e) {
     return errText(`${name} failed: ${(e as Error).message}`);
   }
-});
+  })
+);
 
 (async () => {
   const transport = new StdioServerTransport();

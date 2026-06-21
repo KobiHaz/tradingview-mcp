@@ -17,6 +17,7 @@ async function main() {
       resolve();
     });
   });
+  await ctx.close().catch(() => {});
   process.stderr.write('✓ Login flow completed.\n');
   process.exit(0);
 }
