@@ -33,6 +33,11 @@ export async function dismissPopups(page: Page): Promise<void> {
     'div[role="dialog"] button[aria-label*="lose"]',
     'div[class*="dialogClose"]',
     'span[class*="closeButton"]',
+    // TradingView toast notifications (orders/alerts/gift offers/…) accumulate in
+    // #overlap-manager-root on this MCP's long-lived page; their wrapper can grow to
+    // overlap interactive controls (e.g. the watchlist button) and intercept clicks.
+    // The radar's per-process sync never sees this because it starts a fresh page.
+    'button[data-name^="toast-group-close-button-"]',
   ];
   for (let attempt = 0; attempt < 3; attempt++) {
     let closed = false;
@@ -57,6 +62,24 @@ export async function dismissPopups(page: Page): Promise<void> {
       break;
     }
   }
+
+  // Safety net: some toasts (e.g. promo/"gift" offers) have no close button and
+  // linger, intercepting pointer events. Make any remaining toast wrapper
+  // click-through — scoped to toast subtrees only, so watchlist menus/dialogs
+  // (which also live in #overlap-manager-root) are untouched.
+  await page
+    .evaluate(() => {
+      const wrappers = new Set<HTMLElement>();
+      document.querySelectorAll('[data-name^="toast-group-"]').forEach((btn) => {
+        let n: Element | null = btn;
+        for (let i = 0; i < 4 && n; i++) n = n.parentElement;
+        if (n instanceof HTMLElement) wrappers.add(n);
+      });
+      wrappers.forEach((w) => {
+        w.style.pointerEvents = 'none';
+      });
+    })
+    .catch(() => undefined);
 }
 
 export async function tryWithin<T>(timeout: number, op: () => Promise<T>): Promise<T | null> {
