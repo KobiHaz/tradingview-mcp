@@ -1,0 +1,22 @@
+{
+  "name": "tradingview-mcp",
+  "version": "1.0.0",
+  "description": "Standalone MCP server for TradingView automation: chart screenshots, watchlist CRUD, session status.",
+  "type": "commonjs",
+  "bin": { "tradingview-mcp": "src/server.ts" },
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "login": "tsx src/login.ts",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "playwright": "^1.60.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "@types/node": "^22.0.0"
+  }
+}
