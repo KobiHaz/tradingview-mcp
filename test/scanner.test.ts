@@ -149,6 +149,17 @@ test('parseSearchResults strips <em> tags and keeps key fields', () => {
   ]);
 });
 
+test('parseSearchResults strips <em> from the symbol field (hl=1 ticker highlight)', () => {
+  const raw = [
+    { symbol: '<em>AAPL</em>', description: '<em>Apple</em> Inc.', type: 'stock',
+      exchange: 'NASDAQ', currency_code: 'USD', country: 'US' },
+  ];
+  assert.deepEqual(parseSearchResults(raw), [
+    { symbol: 'AAPL', tvSymbol: 'NASDAQ:AAPL', description: 'Apple Inc.',
+      type: 'stock', exchange: 'NASDAQ', currency: 'USD', country: 'US' },
+  ]);
+});
+
 test('parseSearchResults tolerates missing fields and non-arrays', () => {
   assert.deepEqual(parseSearchResults([{ symbol: 'X' }]), [
     { symbol: 'X', tvSymbol: 'X', description: '', type: '', exchange: '',
