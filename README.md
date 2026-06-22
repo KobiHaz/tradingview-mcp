@@ -36,6 +36,20 @@ This opens a non-headless Chromium window pointed at TradingView's sign-in page.
 | `tv_remove_symbols` | Remove symbols from a named watchlist. Required: `watchlist`, `symbols` (array). |
 | `tv_session_status` | Report whether the saved profile is currently logged in. Returns `{ loggedIn, profileDir }`. |
 
+## Data tools (no login required)
+
+These hit TradingView's public endpoints directly — they work even when `tv_session_status` reports `loggedIn:false`.
+
+| Tool | Purpose | Example |
+|------|---------|---------|
+| `tv_screener` | Market-wide scan by technical filters | `{ "filters": [{"field":"rvol","op":"gt","value":2}, {"field":"rsi","op":"lt","value":30}], "limit": 20 }` |
+| `tv_watchlist_data` | Pull quote data for every symbol in a list (TV watchlist, direct array, or Google Sheet) | `{ "symbols": ["AAPL","NVDA"] }` or `{ "watchlist": "My List" }` or `{ "sheet": "<sheet-id-or-url>" }` |
+
+**Filter fields (tv_screener):** `rvol`, `rsi`, `volume`, `close`, `change`, `macd`, `sma20`/`sma50`/`sma200`, `recommend`.
+**Operators:** `gt`, `lt`, `gte`, `lte`, `eq`, `between` (value = `[min,max]`).
+**Markets:** `america` (default), `crypto`. Inferred from the symbol prefix when omitted.
+**Bare tickers** (e.g. `AAPL`) are auto-qualified to `EXCHANGE:SYMBOL` via TradingView symbol search before scanning.
+
 ## Environment variables
 
 | Variable | Default | Description |

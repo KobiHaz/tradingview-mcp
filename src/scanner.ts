@@ -226,7 +226,7 @@ export interface SearchResult {
 export function parseSearchResults(raw: unknown): SearchResult[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((r: Record<string, unknown>) => {
-    const symbol = String(r.symbol ?? '');
+    const symbol = String(r.symbol ?? '').replace(/<\/?em>/g, '');
     const exchange = String(r.exchange ?? '');
     return {
       symbol,

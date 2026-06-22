@@ -153,7 +153,7 @@ export async function openWatchlist(
   return true;
 }
 
-export async function readCurrentSymbols(page: Page): Promise<string[]> {
+export async function readCurrentSymbols(page: Page, full = false): Promise<string[]> {
   const all = new Set<string>();
 
   const containerHandle = await page.evaluateHandle(() => {
@@ -186,8 +186,15 @@ export async function readCurrentSymbols(page: Page): Promise<string[]> {
   const container = containerHandle.asElement();
 
   const snapshot = async (): Promise<number> => {
-    const symbols = await page.evaluate(() => {
+    const symbols = await page.evaluate((wantFull) => {
       const out: string[] = [];
+      if (wantFull) {
+        document.querySelectorAll('[data-symbol-full]').forEach((el) => {
+          const v = el.getAttribute('data-symbol-full');
+          if (v) out.push(v);
+        });
+        if (out.length) return out;
+      }
       document.querySelectorAll('[data-symbol-short]').forEach((el) => {
         const v = el.getAttribute('data-symbol-short');
         if (v) out.push(v);
@@ -199,7 +206,7 @@ export async function readCurrentSymbols(page: Page): Promise<string[]> {
         });
       }
       return out;
-    });
+    }, full);
     let added = 0;
     for (const s of symbols)
       if (!all.has(s)) {
