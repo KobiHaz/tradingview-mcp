@@ -48,7 +48,7 @@ const TOOLS = [
   { name: 'tv_watchlist_data', description: 'Pull data for every symbol in a list, in one call. Source (exactly one): watchlist (TV list name, needs login), symbols (array), or sheet (Google Sheet id/URL, public CSV). Default = quote snapshot (price/change/RVOL/RSI/recommend); pass indicators+timeframes for a TA matrix. Bare tickers are auto-qualified.',
     inputSchema: { type: 'object', properties: {
       watchlist: { type: 'string' },
-      symbols: { type: 'array', items: { type: 'string' } },
+      symbols: { type: 'array', items: { type: 'string' }, minItems: 1 },
       sheet: { type: 'string' },
       indicators: { type: 'array', items: { type: 'string' } },
       timeframes: { type: 'array', items: { type: 'string' } },
