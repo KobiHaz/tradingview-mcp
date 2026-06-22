@@ -166,6 +166,7 @@ export interface ScreenerBody {
 
 /** Build the scan request body for a market screener. */
 export function buildScreenerBody(opts: ScreenerOptions): ScreenerBody {
+  // clamp to [1,100]: scanner rejects huge ranges, and limit 0 would return no rows
   const limit = Math.min(Math.max(opts.limit ?? 30, 1), 100);
   const sortField = opts.sort?.field ? resolveColumn(opts.sort.field) : 'volume';
   return {
@@ -296,15 +297,13 @@ export async function qualifySymbols(
   symbols: string[],
   resolver: Resolver = searchSymbol
 ): Promise<string[]> {
-  const out: string[] = [];
-  for (const s of symbols) {
-    const sym = s.trim();
-    if (sym.includes(':')) {
-      out.push(sym.toUpperCase());
-      continue;
-    }
-    const hits = await resolver(sym);
-    if (hits[0]?.tvSymbol) out.push(hits[0].tvSymbol);
-  }
-  return out;
+  const results = await Promise.all(
+    symbols.map(async (s) => {
+      const sym = s.trim();
+      if (sym.includes(':')) return sym.toUpperCase();
+      const hits = await resolver(sym);
+      return hits[0]?.tvSymbol ?? null;
+    })
+  );
+  return results.filter((s): s is string => s !== null);
 }

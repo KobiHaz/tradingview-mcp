@@ -81,6 +81,13 @@ test('parseScanResponse tolerates empty/missing data', () => {
   assert.deepEqual(parseScanResponse({}, ['close']), []);
 });
 
+test('parseScanResponse yields nulls when a row has no values', () => {
+  const json = { totalCount: 1, data: [{ s: 'X:Y', d: null }] };
+  assert.deepEqual(parseScanResponse(json, ['close', 'RSI']), [
+    { symbol: 'X:Y', close: null, RSI: null },
+  ]);
+});
+
 // Task 3
 
 test('buildQuoteBody normalizes tickers and uses default columns', () => {
