@@ -4,7 +4,7 @@ A standalone MCP server for TradingView automation: chart screenshots, watchlist
 
 ## What it is
 
-An MCP server exposing 5 tools that drive a persistent Chromium profile via Playwright to interact with TradingView — take chart screenshots, read/add/remove symbols in named watchlists, and check login state. Because it uses a persistent profile, you log in once interactively and all subsequent tool calls reuse that session.
+An MCP server exposing 7 tools that drive a persistent Chromium profile via Playwright to interact with TradingView — take chart screenshots, read/add/remove symbols in named watchlists, and check login state. Because it uses a persistent profile, you log in once interactively and all subsequent tool calls reuse that session.
 
 ## Setup
 
@@ -50,6 +50,8 @@ These hit TradingView's public endpoints directly — they work even when `tv_se
 **Markets:** `america` (default), `crypto`. Inferred from the symbol prefix when omitted.
 **Bare tickers** (e.g. `AAPL`) are auto-qualified to `EXCHANGE:SYMBOL` via TradingView symbol search before scanning.
 
+> **Note:** all symbols in one `tv_watchlist_data` (or `tv_screener`) call are scanned against a single market — inferred from the first symbol, or set via `market`. Symbols from a different market are silently omitted (the response's `count` vs `requested` reveals the drop). For mixed-market lists (e.g. US equities + crypto), split into separate calls per market.
+
 ## Environment variables
 
 | Variable | Default | Description |
@@ -63,7 +65,7 @@ These hit TradingView's public endpoints directly — they work even when `tv_se
 claude mcp add tradingview --scope user -- npx tsx /Users/kobihazout/tradingview-mcp/src/server.ts
 ```
 
-After registering, reload Claude Code (or start a new session). The 5 `tv_*` tools will be available.
+After registering, reload Claude Code (or start a new session). The 7 `tv_*` tools will be available.
 
 ## Development
 
