@@ -4,7 +4,7 @@ A standalone MCP server for TradingView automation: chart screenshots, watchlist
 
 ## What it is
 
-An MCP server exposing 5 tools that drive a persistent Chromium profile via Playwright to interact with TradingView — take chart screenshots, read/add/remove symbols in named watchlists, and check login state. Because it uses a persistent profile, you log in once interactively and all subsequent tool calls reuse that session.
+An MCP server exposing 7 tools that drive a persistent Chromium profile via Playwright to interact with TradingView — take chart screenshots, read/add/remove symbols in named watchlists, and check login state. Because it uses a persistent profile, you log in once interactively and all subsequent tool calls reuse that session.
 
 ## Setup
 
@@ -36,6 +36,22 @@ This opens a non-headless Chromium window pointed at TradingView's sign-in page.
 | `tv_remove_symbols` | Remove symbols from a named watchlist. Required: `watchlist`, `symbols` (array). |
 | `tv_session_status` | Report whether the saved profile is currently logged in. Returns `{ loggedIn, profileDir }`. |
 
+## Data tools (no login required)
+
+These hit TradingView's public endpoints directly — they work even when `tv_session_status` reports `loggedIn:false`.
+
+| Tool | Purpose | Example |
+|------|---------|---------|
+| `tv_screener` | Market-wide scan by technical filters | `{ "filters": [{"field":"rvol","op":"gt","value":2}, {"field":"rsi","op":"lt","value":30}], "limit": 20 }` |
+| `tv_watchlist_data` | Pull quote data for every symbol in a list (TV watchlist, direct array, or Google Sheet) | `{ "symbols": ["AAPL","NVDA"] }` or `{ "watchlist": "My List" }` or `{ "sheet": "<sheet-id-or-url>" }` |
+
+**Filter fields (tv_screener):** `rvol`, `rsi`, `volume`, `close`, `change`, `macd`, `sma20`/`sma50`/`sma200`, `recommend`.
+**Operators:** `gt`, `lt`, `gte`, `lte`, `eq`, `between` (value = `[min,max]`).
+**Markets:** `america` (default), `crypto`. Inferred from the symbol prefix when omitted.
+**Bare tickers** (e.g. `AAPL`) are auto-qualified to `EXCHANGE:SYMBOL` via TradingView symbol search before scanning.
+
+> **Note:** all symbols in one `tv_watchlist_data` (or `tv_screener`) call are scanned against a single market — inferred from the first symbol, or set via `market`. Symbols from a different market are silently omitted (the response's `count` vs `requested` reveals the drop). For mixed-market lists (e.g. US equities + crypto), split into separate calls per market.
+
 ## Environment variables
 
 | Variable | Default | Description |
@@ -49,7 +65,7 @@ This opens a non-headless Chromium window pointed at TradingView's sign-in page.
 claude mcp add tradingview --scope user -- npx tsx /Users/kobihazout/tradingview-mcp/src/server.ts
 ```
 
-After registering, reload Claude Code (or start a new session). The 5 `tv_*` tools will be available.
+After registering, reload Claude Code (or start a new session). The 7 `tv_*` tools will be available.
 
 ## Development
 

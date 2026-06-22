@@ -10,6 +10,7 @@ import { getPage, PROFILE_DIR } from './browser';
 import {
   isLoggedIn, openWatchlist, readCurrentSymbols, addSymbolsBulk, removeSymbol, captureChart,
 } from './driver';
+import { screener, qualifySymbols, fetchSheetSymbols, QUOTE_COLUMNS, buildIndicatorColumns, parseScanResponse, scan, inferMarket } from './scanner';
 
 // Serialize tool calls — they all drive one shared browser page.
 let lock: Promise<unknown> = Promise.resolve();
@@ -35,6 +36,24 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { watchlist: { type: 'string' }, symbols: SYMBOLS_SCHEMA }, required: ['watchlist', 'symbols'], additionalProperties: false } },
   { name: 'tv_session_status', description: 'Report whether the saved TradingView profile is logged in.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'tv_screener', description: 'Scan the market for symbols matching technical filters (no login needed). Fields: rvol, rsi, volume, close, change, macd, sma20/50/200, recommend. Ops: gt, lt, gte, lte, eq, between. Returns ranked rows.',
+    inputSchema: { type: 'object', properties: {
+      filters: { type: 'array', items: { type: 'object', properties: {
+        field: { type: 'string' }, op: { type: 'string' },
+        value: {} }, required: ['field', 'op', 'value'], additionalProperties: false } },
+      market: { type: 'string', description: 'america (default) or crypto' },
+      sort: { type: 'object', properties: { field: { type: 'string' }, order: { type: 'string', enum: ['asc', 'desc'] } }, additionalProperties: false },
+      limit: { type: 'number' } },
+      required: ['filters'], additionalProperties: false } },
+  { name: 'tv_watchlist_data', description: 'Pull data for every symbol in a list, in one call. Source (exactly one): watchlist (TV list name, needs login), symbols (array), or sheet (Google Sheet id/URL, public CSV). Default = quote snapshot (price/change/RVOL/RSI/recommend); pass indicators+timeframes for a TA matrix. Bare tickers are auto-qualified.',
+    inputSchema: { type: 'object', properties: {
+      watchlist: { type: 'string' },
+      symbols: { type: 'array', items: { type: 'string' }, minItems: 1 },
+      sheet: { type: 'string' },
+      indicators: { type: 'array', items: { type: 'string' } },
+      timeframes: { type: 'array', items: { type: 'string' } },
+      market: { type: 'string' } },
+      additionalProperties: false } },
 ];
 
 function text(t: string) { return { content: [{ type: 'text', text: t }] }; }
@@ -60,6 +79,50 @@ server.setRequestHandler(CallToolRequestSchema, async (req) =>
   const name = req.params.name;
   const args: Record<string, unknown> = (req.params.arguments as Record<string, unknown>) || {};
   try {
+    // Data tools — pure network (no browser, no login, no lock dependency).
+    if (name === 'tv_screener') {
+      const out = await screener({
+        filters: (args.filters as { field: string; op: string; value: number | number[] }[]) || [],
+        market: args.market as string | undefined,
+        sort: args.sort as { field: string; order: 'asc' | 'desc' } | undefined,
+        limit: args.limit as number | undefined,
+      });
+      return text(JSON.stringify(out));
+    }
+    if (name === 'tv_watchlist_data') {
+      // 1) Resolve the raw symbol list from exactly one source.
+      let raw: string[] = [];
+      if (Array.isArray(args.symbols) && args.symbols.length) {
+        raw = (args.symbols as string[]).map(String);
+      } else if (args.sheet) {
+        raw = await fetchSheetSymbols(String(args.sheet));
+      } else if (args.watchlist) {
+        const page = await getPage();
+        if (!(await ensureReady(page))) {
+          return errText('Not logged into TradingView. Run `npm run login` once.');
+        }
+        const found = await openWatchlist(page, String(args.watchlist), false);
+        if (!found) return errText(`watchlist not found: ${args.watchlist}`);
+        raw = await readCurrentSymbols(page, true); // full = exchange-qualified
+      } else {
+        return errText('provide one of: symbols, sheet, or watchlist');
+      }
+      if (!raw.length) return errText('no symbols resolved from the given source');
+
+      // 2) Qualify bare tickers (scanner drops unqualified ones).
+      const tickers = await qualifySymbols(raw);
+      if (!tickers.length) return errText('no symbols could be qualified to EXCHANGE:SYMBOL');
+
+      // 3) One scan call for the whole list.
+      const inds = Array.isArray(args.indicators) ? (args.indicators as string[]) : [];
+      const tfs = Array.isArray(args.timeframes) ? (args.timeframes as string[]) : [];
+      const columns = inds.length ? buildIndicatorColumns(inds, tfs.length ? tfs : ['1d']) : QUOTE_COLUMNS;
+      const mkt = (args.market as string) || inferMarket(tickers[0]);
+      const json = await scan(mkt, { symbols: { tickers }, columns });
+      const rows = parseScanResponse(json, columns);
+      return text(JSON.stringify({ count: rows.length, requested: raw.length, rows }));
+    }
+
     const page = await getPage();
 
     if (name === 'tv_session_status') {
