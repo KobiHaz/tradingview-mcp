@@ -4,24 +4,27 @@
 
 **Goal:** Mirror a friend's TradingView sector watchlists (shared public links) into one Google Sheet, one tab per sector, on a daily schedule, so `tv_watchlist_data` can read them for analysis.
 
-**Architecture:** A scheduled local CLI (`npm run sync`) reads each shared watchlist via the existing Playwright profile and writes its symbols into a named tab of one spreadsheet using the Google Sheets API (service account). The read side of `tv_watchlist_data` is extended to read a specific tab by name. Pure logic (config parsing, URL building, payload shaping, orchestration) is unit-tested; browser scraping and live Sheets I/O are kept thin.
+**Architecture:** A scheduled local CLI (`npm run sync`) reads each shared watchlist over plain HTTP (the public share page embeds the symbols in `window.initData` — **no browser, no login**) and writes them into a named tab of one spreadsheet via the Google Sheets API (service account). The read side of `tv_watchlist_data` is extended to read a specific tab by name. Pure logic (config parsing, HTML parsing, URL building, payload shaping, orchestration) is unit-tested; only live Sheets I/O is kept thin.
 
-**Tech Stack:** TypeScript (CommonJS, `tsx`), Playwright (existing persistent profile), `googleapis` (new), `node:test`.
+**Tech Stack:** TypeScript (CommonJS, `tsx`), `googleapis` (new), `node:test`. (No Playwright in the sync path.)
+
+> **Verified:** `GET https://www.tradingview.com/watchlists/86875796/` → HTTP 200 (no auth); HTML contains `window.initData` with `"symbols":["NASDAQ:NVDA",...]` (65 entries, exchange-qualified). One section-header row `"###SEMI - CAP"` was present and must be filtered.
 
 ---
 
 ## File Structure
 
 - `src/sources.ts` (new) — load/validate `watchlist-sources.json` → `Source[]`.
+- `src/shared-watchlist.ts` (new) — `extractSymbols(html)` + `fetchSharedWatchlist(url)`.
 - `src/sheets-writer.ts` (new) — `writeTab()` via googleapis + pure payload helpers.
 - `src/sync.ts` (new) — `runSync()` orchestrator + CLI entry.
 - `src/scanner.ts` (modify) — add `sheetCsvUrl(id, tab?)`; `fetchSheetSymbols(input, tab?)`.
 - `src/server.ts` (modify) — add optional `tab` to `tv_watchlist_data`.
-- `src/driver.ts` (modify) — add `readSharedWatchlist(page, url)`.
+- (`src/driver.ts` is **not** touched — the read side needs no browser.)
 - `watchlist-sources.example.json` (new) — committed template.
 - `.gitignore` (modify) — ignore `watchlist-sources.json` and `*.gserviceaccount.json`.
 - `scripts/com.tradingview-mcp.sync.plist` (new) + `scripts/install-schedule.sh` (new).
-- `test/sources.test.ts`, `test/sync.test.ts` (new); `test/scanner.test.ts`, `test/sheets-writer.test.ts` (new) (modify scanner test).
+- `test/sources.test.ts`, `test/shared-watchlist.test.ts`, `test/sheets-writer.test.ts`, `test/sync.test.ts` (new); `test/scanner.test.ts` (modify).
 - `package.json` (modify) — `sync` script + `googleapis` dep.
 - `README.md` (modify) — document the sync.
 
@@ -399,66 +402,113 @@ git commit -m "feat(sync): Google Sheets tab writer (service account)"
 
 ---
 
-### Task 5: Read a shared watchlist (`src/driver.ts`)
+### Task 5: Read a shared watchlist over HTTP (`src/shared-watchlist.ts`)
 
 **Files:**
-- Modify: `src/driver.ts` (add `readSharedWatchlist` near `openWatchlist`/`readCurrentSymbols`)
+- Create: `src/shared-watchlist.ts`
+- Test: `test/shared-watchlist.test.ts`
 
-This is browser integration; no unit test. Reuses `dismissPopups` and `readCurrentSymbols`.
+No browser. `extractSymbols` is pure and fully unit-tested against a fixture; only the
+one-line `fetch` wrapper is untested I/O.
 
-- [ ] **Step 1: Add the function**
+- [ ] **Step 1: Write the failing test**
 
-In `src/driver.ts`, after `readCurrentSymbols` (ends line ~285), add:
+Create `test/shared-watchlist.test.ts`:
+
+```typescript
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { extractSymbols } from '../src/shared-watchlist';
+
+// Mimics the relevant slice of the real page's window.initData.
+const FIXTURE = `<script>window.initData = {"name":"Semis",` +
+  `"symbols":["###SEMI - CAP","NASDAQ:NVDA","NASDAQ:AMD","KRX:000660","NYSE:BRK.B"],` +
+  `"other":true};</script>`;
+
+test('extractSymbols returns exchange-qualified symbols', () => {
+  assert.deepEqual(extractSymbols(FIXTURE),
+    ['NASDAQ:NVDA', 'NASDAQ:AMD', 'KRX:000660', 'NYSE:BRK.B']);
+});
+
+test('extractSymbols drops section-header rows', () => {
+  assert.ok(!extractSymbols(FIXTURE).includes('###SEMI - CAP'));
+});
+
+test('extractSymbols throws when symbols are absent', () => {
+  assert.throws(() => extractSymbols('<html>no init data here</html>'),
+    /could not find symbols/i);
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npm test`
+Expected: FAIL — cannot find module `../src/shared-watchlist`.
+
+- [ ] **Step 3: Write the implementation**
+
+Create `src/shared-watchlist.ts`:
 
 ```typescript
 /**
- * Read symbols from a TradingView *shared* watchlist public URL.
- * Navigates to the share page (uses the logged-in profile), then reuses the
- * same `[data-symbol-short]` scroll-read as named watchlists.
+ * Read a friend's *shared* TradingView watchlist from its public URL.
+ * The share page (e.g. https://www.tradingview.com/watchlists/<id>/) returns
+ * HTTP 200 with no login and embeds the symbols in `window.initData` as
+ * `"symbols":[ "NASDAQ:NVDA", ... ]`. No browser required.
  */
-export async function readSharedWatchlist(page: Page, shareUrl: string): Promise<string[]> {
-  await page.goto(shareUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
-  await page.waitForTimeout(4000);
-  await dismissPopups(page);
-  // Shared lists render rows with the same data-symbol-short attribute as the
-  // sidebar watchlist. If a future TV change breaks this, add a shared-page
-  // selector fallback here.
-  await page.waitForSelector('[data-symbol-short]', { timeout: 20000 });
-  return readCurrentSymbols(page, true); // full = exchange-qualified
+
+/** Parse the `symbols` array out of a shared-watchlist page's HTML. */
+export function extractSymbols(html: string): string[] {
+  const key = html.indexOf('"symbols":[');
+  if (key === -1) {
+    throw new Error(
+      'shared watchlist: could not find symbols in the page (layout changed, or the list is no longer public)'
+    );
+  }
+  const start = html.indexOf('[', key);
+  let depth = 0;
+  let end = -1;
+  for (let i = start; i < html.length; i++) {
+    const c = html[i];
+    if (c === '[') depth++;
+    else if (c === ']') {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+  if (end === -1) throw new Error('shared watchlist: malformed symbols array');
+  const arr = JSON.parse(html.slice(start, end + 1)) as unknown[];
+  // Keep EXCHANGE:SYMBOL rows; drop section headers ("###...") and any non-strings.
+  return arr.filter(
+    (s): s is string => typeof s === 'string' && s.includes(':') && !s.startsWith('###')
+  );
+}
+
+/** Fetch a shared watchlist URL and return its symbols. */
+export async function fetchSharedWatchlist(url: string): Promise<string[]> {
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  if (!res.ok) {
+    throw new Error(`shared watchlist fetch HTTP ${res.status} — check the link is shared/public: ${url}`);
+  }
+  return extractSymbols(await res.text());
 }
 ```
 
-- [ ] **Step 2: Verify it compiles**
+- [ ] **Step 4: Run tests to verify they pass**
 
-Run: `npm run typecheck`
-Expected: no errors.
+Run: `npm test`
+Expected: PASS for all `shared-watchlist` tests.
 
-- [ ] **Step 3: Manual smoke check (requires a real shared link)**
+- [ ] **Step 5: Smoke check against the real link**
 
-Create a throwaway `tmp-smoke.ts` at the repo root:
+Run: `npx tsx -e "import('./src/shared-watchlist').then(m => m.fetchSharedWatchlist('https://www.tradingview.com/watchlists/86875796/')).then(s => console.log(s.length, s.slice(0,5)))"`
+Expected: prints a count (~65) and the first few `EXCHANGE:SYMBOL` strings.
 
-```typescript
-import { getPage, closeBrowser } from './src/browser';
-import { readSharedWatchlist } from './src/driver';
-
-(async () => {
-  const page = await getPage();
-  const url = process.argv[2];
-  console.log(await readSharedWatchlist(page, url));
-  await closeBrowser();
-})();
-```
-
-Run: `npx tsx tmp-smoke.ts "<a-real-shared-watchlist-url>"`
-Expected: prints an array of `EXCHANGE:SYMBOL` strings. Then delete the file: `rm tmp-smoke.ts`.
-
-> If login is required for the shared page, ensure `npm run login` has been run once. If the array is empty, the selector needs the fallback noted in Step 1 — inspect the page DOM and adjust.
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/driver.ts
-git commit -m "feat(sync): read symbols from a shared watchlist URL"
+git add src/shared-watchlist.ts test/shared-watchlist.test.ts
+git commit -m "feat(sync): read shared watchlist symbols over HTTP (no browser)"
 ```
 
 ---
@@ -570,31 +620,24 @@ export async function runSync(sources: Source[], deps: SyncDeps): Promise<SyncRe
   return res;
 }
 
-/** CLI entry: wire real Playwright + Sheets deps and run one sync. */
+/** CLI entry: wire real HTTP + Sheets deps and run one sync. No browser. */
 async function main(): Promise<void> {
   const sheetId = process.env.SYNC_SHEET_ID;
   if (!sheetId) throw new Error('SYNC_SHEET_ID is not set — the target spreadsheet id.');
 
-  const { getPage, closeBrowser } = await import('./browser');
-  const { readSharedWatchlist } = await import('./driver');
+  const { fetchSharedWatchlist } = await import('./shared-watchlist');
   const { writeTab } = await import('./sheets-writer');
 
-  const sources = loadSources();
-  const page = await getPage();
-  try {
-    const res = await runSync(sources, {
-      sheetId,
-      readList: (url) => readSharedWatchlist(page, url),
-      writeTab,
-      log: (m) => process.stderr.write(m + '\n'),
-    });
-    process.stderr.write(
-      `\nSync done: ${res.written} written, ${res.skipped} skipped, ${res.failures} failed.\n`
-    );
-    process.exitCode = res.failures > 0 ? 1 : 0;
-  } finally {
-    await closeBrowser();
-  }
+  const res = await runSync(loadSources(), {
+    sheetId,
+    readList: fetchSharedWatchlist,
+    writeTab,
+    log: (m) => process.stderr.write(m + '\n'),
+  });
+  process.stderr.write(
+    `\nSync done: ${res.written} written, ${res.skipped} skipped, ${res.failures} failed.\n`
+  );
+  process.exitCode = res.failures > 0 ? 1 : 0;
 }
 
 if (require.main === module) {
@@ -761,7 +804,7 @@ git commit -m "docs(sync): document the watchlist → sheet sync setup"
 
 **Spec coverage:**
 - Source config (gitignored + example) → Task 1. ✓
-- Read shared list via Playwright reuse → Task 5. ✓
+- Read shared list over HTTP (parse `window.initData`, filter `###` headers) → Task 5. ✓
 - Sheets writer via service account → Task 4. ✓
 - Orchestrator + empty-guard + resilience → Task 6. ✓
 - Extend read side with `tab` (gviz) → Tasks 2–3. ✓
@@ -769,10 +812,11 @@ git commit -m "docs(sync): document the watchlist → sheet sync setup"
 - Error handling (broken link, 0-symbol guard, auth failure) → Tasks 4 & 6 + docs. ✓
 - Setup docs → Task 8. ✓
 
-**Type consistency:** `Source {name,shareUrl,tab}` (Task 1) used identically in Tasks 6.
+**Type consistency:** `Source {name,shareUrl,tab}` (Task 1) used identically in Task 6.
 `writeTab(spreadsheetId, tab, symbols)` (Task 4) matches the `SyncDeps.writeTab` signature
 and the real wiring in Task 6. `fetchSheetSymbols(input, tab?)` (Task 2) matches the
-caller in Task 3. `readSharedWatchlist(page, url)` (Task 5) matches `readList` wiring in Task 6.
+caller in Task 3. `fetchSharedWatchlist(url): Promise<string[]>` (Task 5) matches the
+`SyncDeps.readList` signature wired in Task 6.
 
 **Placeholders:** none — every code/command step is concrete. The plist `__REPO__` etc.
 are intentional installer-substituted tokens, documented in Task 7.

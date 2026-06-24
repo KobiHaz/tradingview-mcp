@@ -38,15 +38,23 @@ has no account-to-account watchlist sync, so we build a one-directional mirror:
 launchd (daily, configurable time)
   → npm run sync
      → for each source { name, shareUrl, tab }:
-          driver.readSharedWatchlist(shareUrl)        # Playwright scrape (reuse scroll-read)
+          fetchSharedWatchlist(shareUrl)               # plain HTTP, parse window.initData — NO browser
           sheetsWriter.writeTab(sheetId, tab, symbols) # googleapis service account
      → Sheet updated, summary logged
   ↓ downstream (unchanged data flow)
 tv_watchlist_data { sheet, tab }                       # existing analysis pipeline
 ```
 
-The mirror depends on the **local logged-in Chromium profile**, so it must run on
-the user's machine, not in the cloud.
+**Key finding (verified against a real shared list, id 86875796):** the public share
+page returns **HTTP 200 with no login**, and the full symbol list is embedded in the
+HTML as `window.initData` → `"symbols":[ "NASDAQ:NVDA", ... ]`, already exchange-
+qualified. So the read side is a plain `fetch()` + parse — **no Playwright, no login,
+no scrolling**. The list may include section-header rows (e.g. `"###SEMI - CAP"`),
+which we filter out (anything without a `:` or starting with `###`).
+
+The sync therefore depends only on local Google **Sheets credentials**, not on the
+Chromium profile. (We keep it on the local schedule for simplicity; it is no longer
+browser-bound.)
 
 ## Components (units, with boundaries)
 
@@ -57,12 +65,13 @@ the user's machine, not in the cloud.
 - `watchlist-sources.json` is **gitignored** (contains the friend's private links).
   A `watchlist-sources.example.json` is committed as a template.
 
-### `src/driver.ts` (extend existing)
-- **Add:** `readSharedWatchlist(page, shareUrl): Promise<string[]>`.
-- **How:** navigate to `shareUrl`, dismiss popups (reuse `dismissPopups`), then reuse
-  the existing scroll-and-collect logic. Existing `readCurrentSymbols` reads
-  `[data-symbol-short]`; verify the shared page exposes the same attribute and, if
-  not, add a shared-page selector fallback. No change to existing functions' behavior.
+### `src/shared-watchlist.ts` (new)
+- **Does:** reads a friend's shared watchlist symbols from its public URL.
+- **Interface:** `extractSymbols(html): string[]` (pure, unit-tested) and
+  `fetchSharedWatchlist(url): Promise<string[]>` (thin `fetch` wrapper).
+- **How:** locate `"symbols":[` in the page HTML, bracket-match the array, `JSON.parse`
+  it, and filter out non-symbol rows (no `:` or `###` section headers). No browser,
+  no login — `src/driver.ts` is untouched by this feature.
 
 ### `src/sheets-writer.ts`
 - **Does:** writes a symbol list into one tab of the target spreadsheet.
@@ -77,8 +86,8 @@ the user's machine, not in the cloud.
 - **Does:** orchestrates one full sync run; CLI entry for `npm run sync`.
 - **Flow:** load sources → for each, read shared list then write tab → print a
   per-list summary (read count, added/removed vs. the tab's previous contents).
-- **Depends on:** `sources`, `driver` (+ a Playwright context like the other entries),
-  `sheets-writer`. Continues past per-list failures; exits non-zero if any failed.
+- **Depends on:** `sources`, `shared-watchlist`, `sheets-writer`. No browser. Continues
+  past per-list failures; exits non-zero if any failed.
 
 ### `src/scanner.ts` (extend existing read side)
 - **Add `tab` support to `fetchSheetSymbols`:** when a `tab` is given, read via the
@@ -104,13 +113,12 @@ the user's machine, not in the cloud.
 
 - **Broken link / sharing turned off:** log the error for that list, continue with
   the others, and **do not touch** that tab.
-- **Read returns 0 symbols:** treated as a suspected scrape failure → **skip the
+- **Read returns 0 symbols:** treated as a suspected fetch/parse failure → **skip the
   write** so a transient miss never wipes a good tab. Logged loudly.
+- **`window.initData` not found / layout changed / list made private:** `extractSymbols`
+  throws a clear error; sync logs it for that list and moves on (tab untouched).
 - **Sheets auth failure:** hard fail with an actionable message (which env var /
   which email to share the sheet with).
-- **Partial scroll read:** the existing reader already returns a partial set with a
-  warning rather than throwing; sync logs the warning but still writes (a partial
-  list is non-empty, so the empty-guard does not trip — acceptable, surfaced in logs).
 
 ## Testing
 
@@ -122,14 +130,19 @@ Unit tests in `test/` matching the existing `tsx --test` style:
   (tab-create when missing, clear range, written values incl. header).
 - `sync`: empty-read guard skips the write; one list failing does not abort the rest.
 
-The live Playwright scrape and real Sheets I/O are integration concerns kept thin and
-out of unit tests (googleapis client is mocked).
+- `shared-watchlist`: `extractSymbols` parses a fixture HTML snippet, filters section
+  headers (`###...`) and non-symbol rows, returns the qualified list; throws when
+  `symbols` is absent.
+
+Real Sheets I/O is the only integration concern kept thin and out of unit tests
+(googleapis client is mocked); the read side is now plain HTTP and fully unit-tested.
 
 ## Out of scope (YAGNI)
 
 - Bi-directional sync (Sheet → TradingView).
 - Inline annotation columns / symbol-keyed merge (decided against).
-- Cloud execution (depends on the local browser profile).
+- Cloud execution (kept local for simplicity; no longer technically blocked since the
+  read side needs no browser — could move to cloud later if the Sheets creds go too).
 - Auto-discovering the friend's lists (links are provided explicitly in config).
 
 ## One-time setup the user must do
