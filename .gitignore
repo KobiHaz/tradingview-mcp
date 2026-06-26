@@ -2,5 +2,3 @@ node_modules/
 *.png
 .cache/
 dist/
-watchlist-sources.json
-*.gserviceaccount.json

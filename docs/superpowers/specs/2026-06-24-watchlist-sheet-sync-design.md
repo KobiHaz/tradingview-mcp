@@ -1,7 +1,17 @@
 # Watchlist → Google Sheet Sync — Design
 
 **Date:** 2026-06-24
-**Status:** Approved (design)
+**Status:** Split (2026-06-26) — see note below.
+
+> **Architecture update (2026-06-26):** Responsibilities were split across projects.
+> This MCP keeps only the **TradingView read capability** — exposed as the
+> `tv_read_shared_watchlist` tool (backed by `src/shared-watchlist.ts`) plus the `tab`
+> option on `tv_watchlist_data`. The **Google-Sheet writing half** (config of which
+> list→which tab, the `googleapis` service-account writer, the orchestrator, and the
+> schedule) moves to **smart-volume-radar**, which already owns that Sheet as its scan
+> universe (`src/config/index.ts` reads it via public CSV). The sections below describe
+> the original single-project design and are retained for context; the writer/sync/
+> schedule components no longer live in this repo.
 
 ## Problem
 
