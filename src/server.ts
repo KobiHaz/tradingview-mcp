@@ -45,11 +45,12 @@ const TOOLS = [
       sort: { type: 'object', properties: { field: { type: 'string' }, order: { type: 'string', enum: ['asc', 'desc'] } }, additionalProperties: false },
       limit: { type: 'number' } },
       required: ['filters'], additionalProperties: false } },
-  { name: 'tv_watchlist_data', description: 'Pull data for every symbol in a list, in one call. Source (exactly one): watchlist (TV list name, needs login), symbols (array), or sheet (Google Sheet id/URL, public CSV). Default = quote snapshot (price/change/RVOL/RSI/recommend); pass indicators+timeframes for a TA matrix. Bare tickers are auto-qualified.',
+  { name: 'tv_watchlist_data', description: 'Pull data for every symbol in a list, in one call. Source (exactly one): watchlist (TV list name, needs login), symbols (array), or sheet (Google Sheet id/URL, public CSV). Default = quote snapshot (price/change/RVOL/RSI/recommend); pass indicators+timeframes for a TA matrix. Bare tickers are auto-qualified. Use `tab` to target a specific tab of a multi-tab sheet.',
     inputSchema: { type: 'object', properties: {
       watchlist: { type: 'string' },
       symbols: { type: 'array', items: { type: 'string' }, minItems: 1 },
       sheet: { type: 'string' },
+      tab: { type: 'string', description: 'Optional sheet tab name (used with `sheet`).' },
       indicators: { type: 'array', items: { type: 'string' } },
       timeframes: { type: 'array', items: { type: 'string' } },
       market: { type: 'string' } },
@@ -95,7 +96,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) =>
       if (Array.isArray(args.symbols) && args.symbols.length) {
         raw = (args.symbols as string[]).map(String);
       } else if (args.sheet) {
-        raw = await fetchSheetSymbols(String(args.sheet));
+        raw = await fetchSheetSymbols(String(args.sheet), args.tab ? String(args.tab) : undefined);
       } else if (args.watchlist) {
         const page = await getPage();
         if (!(await ensureReady(page))) {

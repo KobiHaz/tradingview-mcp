@@ -257,7 +257,13 @@ export async function searchSymbol(query: string): Promise<SearchResult[]> {
 // Task 8: Google Sheet CSV source
 // ---------------------------------------------------------------------------
 
-const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/{id}/export?format=csv';
+/** Build the public CSV URL for a sheet; with `tab`, target that tab by name via gviz. */
+export function sheetCsvUrl(id: string, tab?: string): string {
+  if (tab && tab.trim()) {
+    return `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
+  }
+  return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv`;
+}
 
 /** Accept a raw sheet id or any Google Sheets URL; return the id. */
 export function sheetIdFromInput(input: string): string {
@@ -273,13 +279,13 @@ export function parseSheetCsv(csv: string): string[] {
   return cells.filter(Boolean);
 }
 
-/** Fetch a public Google Sheet's first column as a symbol list. */
-export async function fetchSheetSymbols(input: string): Promise<string[]> {
+/** Fetch a public Google Sheet's first column as a symbol list (optionally a named tab). */
+export async function fetchSheetSymbols(input: string, tab?: string): Promise<string[]> {
   const id = sheetIdFromInput(input);
-  const res = await fetch(SHEET_CSV_URL.replace('{id}', encodeURIComponent(id)));
+  const res = await fetch(sheetCsvUrl(id, tab));
   if (!res.ok) {
     throw new Error(
-      `sheet fetch HTTP ${res.status} — check the id and that the sheet is shared "Anyone with the link can view"`
+      `sheet fetch HTTP ${res.status} — check the id/tab and that the sheet is shared "Anyone with the link can view"`
     );
   }
   return parseSheetCsv(await res.text());

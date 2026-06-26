@@ -79,3 +79,35 @@ npm test
 # Run the server directly (stdio MCP protocol)
 npm start
 ```
+
+## Watchlist → Google Sheet sync
+
+Mirror someone else's TradingView sector watchlists (shared public links) into one
+Google Sheet, one tab per sector, on a daily schedule. The sheet then feeds
+`tv_watchlist_data` (use its `tab` argument to pick a sector). The read side is plain
+HTTP — it parses the symbols embedded in the public share page, so **no browser or
+login is needed for the sync** (only Google Sheets credentials, for writing).
+
+### One-time setup
+
+1. **Friend:** for each sector list, enable **"Share list"** in advanced view and send
+   you the public link. (Keep sharing on — the link stays live. Do **not** "copy to
+   myself"; that is a static snapshot.)
+2. **Sheet:** create one spreadsheet (e.g. `watchlist-sync`); set
+   "Anyone with the link can view" (needed for the CSV read path).
+3. **Service account:** in Google Cloud, enable the Sheets API, create a service
+   account, download its JSON key, and share the spreadsheet with the service-account
+   email as **Editor**.
+4. **Config:** copy `watchlist-sources.example.json` → `watchlist-sources.json` and fill
+   in `name`, `shareUrl`, `tab` per sector.
+5. **Env:** set `GOOGLE_SHEETS_CREDENTIALS` (path to the JSON key) and `SYNC_SHEET_ID`
+   (the spreadsheet id from its URL).
+
+### Run
+
+- Once, manually: `SYNC_SHEET_ID=... GOOGLE_SHEETS_CREDENTIALS=... npm run sync`
+- Daily at 15:30 (Israel, pre-US-open): `bash scripts/install-schedule.sh`
+  (edit `StartCalendarInterval` in `scripts/com.tradingview-mcp.sync.plist` to change the time).
+
+Logs: `.cache/sync.log`. A list that reads 0 symbols is skipped (never wipes a good tab);
+a broken link logs an error and the other lists still sync.
