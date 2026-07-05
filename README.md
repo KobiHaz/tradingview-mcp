@@ -11,7 +11,7 @@ An MCP server exposing 7 tools that drive a persistent Chromium profile via Play
 ### 1. Install
 
 ```bash
-cd /Users/kobihazout/tradingview-mcp
+cd /Users/kobihazout/dev/tradingview-mcp
 npm install
 npx playwright install chromium
 ```
@@ -62,7 +62,7 @@ These hit TradingView's public endpoints directly — they work even when `tv_se
 ## Register with Claude Code
 
 ```bash
-claude mcp add tradingview --scope user -- npx tsx /Users/kobihazout/tradingview-mcp/src/server.ts
+claude mcp add tradingview --scope user -- npx tsx /Users/kobihazout/dev/tradingview-mcp/src/server.ts
 ```
 
 After registering, reload Claude Code (or start a new session). The 7 `tv_*` tools will be available.
