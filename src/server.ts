@@ -11,6 +11,7 @@ import {
   isLoggedIn, openWatchlist, readCurrentSymbols, addSymbolsBulk, removeSymbol, captureChart,
 } from './driver';
 import { screener, qualifySymbols, fetchSheetSymbols, QUOTE_COLUMNS, buildIndicatorColumns, parseScanResponse, scan, inferMarket } from './scanner';
+import { fetchSharedWatchlist } from './shared-watchlist';
 
 // Serialize tool calls — they all drive one shared browser page.
 let lock: Promise<unknown> = Promise.resolve();
@@ -36,6 +37,8 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { watchlist: { type: 'string' }, symbols: SYMBOLS_SCHEMA }, required: ['watchlist', 'symbols'], additionalProperties: false } },
   { name: 'tv_session_status', description: 'Report whether the saved TradingView profile is logged in.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'tv_read_shared_watchlist', description: 'Read the exchange-qualified symbols from a TradingView shared/public watchlist URL (e.g. https://www.tradingview.com/watchlists/<id>/). No login — parses the symbols embedded in the public share page. Section-header rows are dropped. Returns { url, count, symbols }.',
+    inputSchema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'], additionalProperties: false } },
   { name: 'tv_screener', description: 'Scan the market for symbols matching technical filters (no login needed). Fields: rvol, rsi, volume, close, change, macd, sma20/50/200, recommend. Ops: gt, lt, gte, lte, eq, between. Returns ranked rows.',
     inputSchema: { type: 'object', properties: {
       filters: { type: 'array', items: { type: 'object', properties: {
@@ -45,11 +48,12 @@ const TOOLS = [
       sort: { type: 'object', properties: { field: { type: 'string' }, order: { type: 'string', enum: ['asc', 'desc'] } }, additionalProperties: false },
       limit: { type: 'number' } },
       required: ['filters'], additionalProperties: false } },
-  { name: 'tv_watchlist_data', description: 'Pull data for every symbol in a list, in one call. Source (exactly one): watchlist (TV list name, needs login), symbols (array), or sheet (Google Sheet id/URL, public CSV). Default = quote snapshot (price/change/RVOL/RSI/recommend); pass indicators+timeframes for a TA matrix. Bare tickers are auto-qualified.',
+  { name: 'tv_watchlist_data', description: 'Pull data for every symbol in a list, in one call. Source (exactly one): watchlist (TV list name, needs login), symbols (array), or sheet (Google Sheet id/URL, public CSV). Default = quote snapshot (price/change/RVOL/RSI/recommend); pass indicators+timeframes for a TA matrix. Bare tickers are auto-qualified. Use `tab` to target a specific tab of a multi-tab sheet.',
     inputSchema: { type: 'object', properties: {
       watchlist: { type: 'string' },
       symbols: { type: 'array', items: { type: 'string' }, minItems: 1 },
       sheet: { type: 'string' },
+      tab: { type: 'string', description: 'Optional sheet tab name (used with `sheet`).' },
       indicators: { type: 'array', items: { type: 'string' } },
       timeframes: { type: 'array', items: { type: 'string' } },
       market: { type: 'string' } },
@@ -80,6 +84,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) =>
   const args: Record<string, unknown> = (req.params.arguments as Record<string, unknown>) || {};
   try {
     // Data tools — pure network (no browser, no login, no lock dependency).
+    if (name === 'tv_read_shared_watchlist') {
+      const url = String(args.url || '');
+      if (!url) return errText('provide a shared watchlist url');
+      const symbols = await fetchSharedWatchlist(url);
+      return text(JSON.stringify({ url, count: symbols.length, symbols }));
+    }
     if (name === 'tv_screener') {
       const out = await screener({
         filters: (args.filters as { field: string; op: string; value: number | number[] }[]) || [],
@@ -95,7 +105,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) =>
       if (Array.isArray(args.symbols) && args.symbols.length) {
         raw = (args.symbols as string[]).map(String);
       } else if (args.sheet) {
-        raw = await fetchSheetSymbols(String(args.sheet));
+        raw = await fetchSheetSymbols(String(args.sheet), args.tab ? String(args.tab) : undefined);
       } else if (args.watchlist) {
         const page = await getPage();
         if (!(await ensureReady(page))) {

@@ -4,7 +4,7 @@ A standalone MCP server for TradingView automation: chart screenshots, watchlist
 
 ## What it is
 
-An MCP server exposing 7 tools that drive a persistent Chromium profile via Playwright to interact with TradingView — take chart screenshots, read/add/remove symbols in named watchlists, and check login state. Because it uses a persistent profile, you log in once interactively and all subsequent tool calls reuse that session.
+An MCP server exposing 8 tools — some drive a persistent Chromium profile via Playwright (chart screenshots, read/add/remove symbols in named watchlists, login state), others hit TradingView's public endpoints with no login (screener, watchlist data, shared-watchlist reads). Because it uses a persistent profile, you log in once interactively and all subsequent browser tool calls reuse that session.
 
 ## Setup
 
@@ -43,7 +43,8 @@ These hit TradingView's public endpoints directly — they work even when `tv_se
 | Tool | Purpose | Example |
 |------|---------|---------|
 | `tv_screener` | Market-wide scan by technical filters | `{ "filters": [{"field":"rvol","op":"gt","value":2}, {"field":"rsi","op":"lt","value":30}], "limit": 20 }` |
-| `tv_watchlist_data` | Pull quote data for every symbol in a list (TV watchlist, direct array, or Google Sheet) | `{ "symbols": ["AAPL","NVDA"] }` or `{ "watchlist": "My List" }` or `{ "sheet": "<sheet-id-or-url>" }` |
+| `tv_watchlist_data` | Pull quote data for every symbol in a list (TV watchlist, direct array, or Google Sheet) | `{ "symbols": ["AAPL","NVDA"] }` or `{ "watchlist": "My List" }` or `{ "sheet": "<sheet-id-or-url>", "tab": "Semis" }` |
+| `tv_read_shared_watchlist` | Read symbols from a **shared/public** watchlist URL (no login) | `{ "url": "https://www.tradingview.com/watchlists/86875796/" }` |
 
 **Filter fields (tv_screener):** `rvol`, `rsi`, `volume`, `close`, `change`, `macd`, `sma20`/`sma50`/`sma200`, `recommend`.
 **Operators:** `gt`, `lt`, `gte`, `lte`, `eq`, `between` (value = `[min,max]`).
@@ -79,3 +80,23 @@ npm test
 # Run the server directly (stdio MCP protocol)
 npm start
 ```
+
+## Reading a friend's shared watchlist
+
+`tv_read_shared_watchlist` reads the symbols from any TradingView **shared/public**
+watchlist URL (e.g. `https://www.tradingview.com/watchlists/<id>/`) — **no login**.
+It parses the symbols embedded in the public share page and drops section-header rows,
+returning `{ url, count, symbols }` with exchange-qualified tickers.
+
+```
+{ "url": "https://www.tradingview.com/watchlists/86875796/" }
+→ { "url": "...", "count": 64, "symbols": ["NASDAQ:NVDA", ...] }
+```
+
+For the friend to expose a list: open it in advanced view, enable **"Share list"**, and
+send the link. Keep sharing on — the link stays live (do **not** "copy to myself"; that
+is a static snapshot).
+
+> **Mirroring these lists into a Google Sheet** (one tab per sector, on a schedule) lives
+> in the **smart-volume-radar** project, which owns that Sheet as its scan universe. This
+> MCP only provides the read capability above; radar consumes it and writes the Sheet.
