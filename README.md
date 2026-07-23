@@ -11,7 +11,7 @@ An MCP server exposing 8 tools — some drive a persistent Chromium profile via 
 ### 1. Install
 
 ```bash
-git clone https://github.com/KobiHaz/tradingview-mcp.git
+git clone https://github.com/22syn/tradingview-mcp.git
 cd tradingview-mcp
 npm install
 npx playwright install chromium
