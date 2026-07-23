@@ -4,14 +4,15 @@ A standalone MCP server for TradingView automation: chart screenshots, watchlist
 
 ## What it is
 
-An MCP server exposing 7 tools that drive a persistent Chromium profile via Playwright to interact with TradingView — take chart screenshots, read/add/remove symbols in named watchlists, and check login state. Because it uses a persistent profile, you log in once interactively and all subsequent tool calls reuse that session.
+An MCP server exposing 8 tools — some drive a persistent Chromium profile via Playwright (chart screenshots, read/add/remove symbols in named watchlists, login state), others hit TradingView's public endpoints with no login (screener, watchlist data, shared-watchlist reads). Because it uses a persistent profile, you log in once interactively and all subsequent browser tool calls reuse that session.
 
 ## Setup
 
 ### 1. Install
 
 ```bash
-cd /Users/kobihazout/dev/tradingview-mcp
+git clone https://github.com/KobiHaz/tradingview-mcp.git
+cd tradingview-mcp
 npm install
 npx playwright install chromium
 ```
@@ -24,7 +25,7 @@ npm run login
 
 This opens a non-headless Chromium window pointed at TradingView's sign-in page. Log in with your TradingView credentials, then close the browser window. The session is saved in the persistent profile and reused for all future tool calls.
 
-> If you already have a logged-in Playwright profile (e.g. the radar project's profile at `~/.cache/svr-tv-sync/chromium-profile`), set `TV_PROFILE_DIR` to point at it and skip the login step.
+> If you already have a logged-in Playwright/Chromium profile for TradingView, set `TV_PROFILE_DIR` to point at it and skip the login step.
 
 ## Tools
 
@@ -43,7 +44,8 @@ These hit TradingView's public endpoints directly — they work even when `tv_se
 | Tool | Purpose | Example |
 |------|---------|---------|
 | `tv_screener` | Market-wide scan by technical filters | `{ "filters": [{"field":"rvol","op":"gt","value":2}, {"field":"rsi","op":"lt","value":30}], "limit": 20 }` |
-| `tv_watchlist_data` | Pull quote data for every symbol in a list (TV watchlist, direct array, or Google Sheet) | `{ "symbols": ["AAPL","NVDA"] }` or `{ "watchlist": "My List" }` or `{ "sheet": "<sheet-id-or-url>" }` |
+| `tv_watchlist_data` | Pull quote data for every symbol in a list (TV watchlist, direct array, or Google Sheet) | `{ "symbols": ["AAPL","NVDA"] }` or `{ "watchlist": "My List" }` or `{ "sheet": "<sheet-id-or-url>", "tab": "Semis" }` |
+| `tv_read_shared_watchlist` | Read symbols from a **shared/public** watchlist URL (no login) | `{ "url": "https://www.tradingview.com/watchlists/<id>/" }` |
 
 **Filter fields (tv_screener):** `rvol`, `rsi`, `volume`, `close`, `change`, `macd`, `sma20`/`sma50`/`sma200`, `recommend`.
 **Operators:** `gt`, `lt`, `gte`, `lte`, `eq`, `between` (value = `[min,max]`).
@@ -62,10 +64,10 @@ These hit TradingView's public endpoints directly — they work even when `tv_se
 ## Register with Claude Code
 
 ```bash
-claude mcp add tradingview --scope user -- npx tsx /Users/kobihazout/dev/tradingview-mcp/src/server.ts
+claude mcp add tradingview --scope user -- npx tsx /path/to/tradingview-mcp/src/server.ts
 ```
 
-After registering, reload Claude Code (or start a new session). The 7 `tv_*` tools will be available.
+Replace `/path/to/tradingview-mcp` with the absolute path where you cloned the repo. After registering, reload Claude Code (or start a new session). The 8 `tv_*` tools will be available.
 
 ## Development
 
@@ -79,3 +81,42 @@ npm test
 # Run the server directly (stdio MCP protocol)
 npm start
 ```
+
+## Reading a friend's shared watchlist
+
+`tv_read_shared_watchlist` reads the symbols from any TradingView **shared/public**
+watchlist URL (e.g. `https://www.tradingview.com/watchlists/<id>/`) — **no login**.
+It parses the symbols embedded in the public share page and drops section-header rows,
+returning `{ url, count, symbols }` with exchange-qualified tickers.
+
+```
+{ "url": "https://www.tradingview.com/watchlists/<id>/" }
+→ { "url": "...", "count": 64, "symbols": ["NASDAQ:NVDA", ...] }
+```
+
+For the friend to expose a list: open it in advanced view, enable **"Share list"**, and
+send the link. Keep sharing on — the link stays live (do **not** "copy to myself"; that
+is a static snapshot).
+
+> **Tip:** you can feed the symbols returned here straight into `tv_watchlist_data` (or a
+> Google Sheet) to build a scan universe from one or more shared lists. This MCP provides
+> the read capability; what you do with the symbols downstream is up to you.
+
+## Security & privacy
+
+- **Local-first.** Everything runs on your machine. There is no hosted backend, no proxy, and no third party — your data and your TradingView session never leave your computer.
+- **Your own login.** Browser tools reuse a persistent Chromium profile that *you* log into interactively (`npm run login`). No credentials, cookies, tokens, or API keys are ever read, stored, or transmitted by this code. Your session lives only in the local profile directory (`~/.cache/tradingview-mcp/profile` by default), which is outside the repo and never committed.
+- **No secrets in the repo.** There is nothing to leak — grep the source and you'll find no keys or tokens. Screenshots are written to the OS temp directory and deleted immediately after they're read.
+- **Public endpoints only.** The data tools (`tv_screener`, `tv_watchlist_data`, `tv_read_shared_watchlist`) call TradingView's and Google Sheets' *public* endpoints with no authentication.
+
+## Disclaimer
+
+This is an **unofficial** project and is **not affiliated with, endorsed by, or sponsored by TradingView**. It automates a browser session you log into yourself and reads public endpoints. Use it in accordance with TradingView's Terms of Service. Nothing here is financial advice.
+
+## Contributing
+
+Issues and pull requests are welcome — new screener fields, additional markets, other data endpoints, or Windows/Linux profile notes. Please keep the "no secrets, local-first" posture intact: don't add anything that requires committing credentials.
+
+## License
+
+[MIT](LICENSE) © Kobi Hazout

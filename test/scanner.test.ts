@@ -6,9 +6,23 @@ import {
   buildQuoteBody, QUOTE_COLUMNS,
   buildScreenerBody,
   parseSearchResults,
-  sheetIdFromInput, parseSheetCsv,
+  sheetIdFromInput, parseSheetCsv, sheetCsvUrl,
   qualifySymbols,
 } from '../src/scanner';
+
+test('sheetCsvUrl without tab uses the first-sheet export endpoint', () => {
+  assert.equal(
+    sheetCsvUrl('ABC123'),
+    'https://docs.google.com/spreadsheets/d/ABC123/export?format=csv'
+  );
+});
+
+test('sheetCsvUrl with tab uses the gviz endpoint with the encoded sheet name', () => {
+  assert.equal(
+    sheetCsvUrl('ABC123', 'Big Tech'),
+    'https://docs.google.com/spreadsheets/d/ABC123/gviz/tq?tqx=out:csv&sheet=Big%20Tech'
+  );
+});
 
 test('inferMarket maps known exchange prefixes', () => {
   assert.equal(inferMarket('NASDAQ:AAPL'), 'america');
