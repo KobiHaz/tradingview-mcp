@@ -19,9 +19,9 @@ check login state. Runs in-process via `tsx` (no build step).
 - `src/driver.ts` — TradingView interaction logic (screenshots, watchlist ops)
 - `src/browser.ts` — persistent Chromium profile / Playwright setup
 - `src/scanner.ts` — screener + watchlist-data logic against public endpoints
+- `src/shared-watchlist.ts` — read a shared/public watchlist from its URL (no login)
 - `src/login.ts` — one-time interactive login flow (`npm run login`)
-- `test/` — unit tests (`driver.test.ts`, `scanner.test.ts`), no browser required
-- `docs/` — additional docs
+- `test/` — unit tests (`driver.test.ts`, `scanner.test.ts`, `shared-watchlist.test.ts`), no browser required
 
 ## Run / dev
 
@@ -36,7 +36,7 @@ npm run typecheck   # tsc --noEmit
 
 Register with Claude Code:
 ```bash
-claude mcp add tradingview --scope user -- npx tsx /Users/kobihazout/dev/tradingview-mcp/src/server.ts
+claude mcp add tradingview --scope user -- npx tsx /path/to/tradingview-mcp/src/server.ts
 ```
 
 ## Conventions / notes
@@ -44,10 +44,8 @@ claude mcp add tradingview --scope user -- npx tsx /Users/kobihazout/dev/trading
 - Login-based tools reuse a persistent Chromium profile — log in once, sessions persist.
 - Login-required tools: `tv_screenshot`, `tv_read_watchlist`, `tv_add_symbols`,
   `tv_remove_symbols`, `tv_session_status`.
-- Data tools (no login): `tv_screener`, `tv_watchlist_data` — hit public endpoints.
+- Data tools (no login): `tv_screener`, `tv_watchlist_data`, `tv_read_shared_watchlist` — hit public endpoints.
 - One `tv_screener` / `tv_watchlist_data` call scans a single market (inferred from
   the first symbol, or set via `market`); mixed-market lists must be split per call.
 - Env vars: `TV_PROFILE_DIR` (persistent profile path; point at an existing logged-in
   profile to skip login), `TV_HEADED` (set to run Chromium with a visible window).
-- The `.claude/skills/` reference files are a generic cabinet-wide Repomix dump, not
-  repo-specific — do not rely on them for this project's structure.
